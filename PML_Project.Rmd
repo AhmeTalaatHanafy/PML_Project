@@ -1,0 +1,218 @@
+---
+output: 
+  html_document: 
+    keep_md: yes
+---
+#Practical Machine Learning [Course Project] - coursera 
+
+--------------------------------------------------
+
+>By: Ahmed Talaat                    
+         15 - 06 - 2018
+
+------------------------------------------------
+
+##Background:
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website [ here ](http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset).
+
+
+###Data:
+
+The training data for this project are available here: [ pml-training.csv ](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)
+
+The test data are available here: [ pml-testing.csv ](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+The data for this project come from this [ source ](http://groupware.les.inf.puc-rio.br/har). If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+
+###Goal:
+
+The goal of your project is to **predict the manner in which they did the exercise**. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+
+------------------------------------------------
+
+##Getting and Cleaning Data
+
+###Getting 
+
+```{r data, echo=TRUE}
+# Preaparing the environment 
+library(knitr)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+library(corrplot)
+library(survival)
+library(splines)
+library(parallel)
+library(gbm)
+
+set.seed(12345)
+
+# After downloading data at your W-DIR 
+
+training <- read.csv("./pml-training.csv")
+
+testing <- read.csv("./pml-testing.csv")
+
+#Splitting the training set into two datasets
+
+inTrain <- createDataPartition(training$classe,
+                               p = 0.7, list = FALSE)
+trainSet <- training[inTrain, ]
+testSet <- training[-inTrain, ]
+dim(trainSet)
+
+dim(testSet)
+
+```
+
+###Cleaning 
+
+```{r cleaning, echo = TRUE}
+#remove near zero variance variables 
+##for training set
+nzv <- nearZeroVar(trainSet)
+trainSet <- trainSet[, -nzv]
+
+##for testing set
+testSet <- testSet[, -nzv]
+
+dim(trainSet)
+
+dim(testSet)
+
+# remove variables that are mostly NA
+
+AllNA <- sapply(trainSet, function(x) mean(is.na(x))) > 0.95
+
+trainSet <- trainSet[, AllNA == F]
+
+testSet <- testSet[, AllNA == F]
+
+dim(trainSet)
+
+dim(testSet)
+
+# remove identification only variables (columns 1 to 5)
+trainSet <- trainSet[, -(1:5)]
+testSet  <- testSet[, -(1:5)]
+
+dim(trainSet)
+
+dim(testSet)
+
+```
+
+###Correlation Analysis:
+
+```{r cor, echo=TRUE}
+
+corMatrix <- cor(trainSet[, -54])
+
+corrplot(corMatrix, order = "FPC", method = "color", type = "lower", tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+
+```
+
+-----------------------------------------------
+
+##Prediction Model Building 
+
+Three methods will be applied to model the regressions (in the Train dataset) and the best one (with higher accuracy when applied to the Test dataset) will be used for the quiz predictions. The methods are: **Random Forests**, **Decision Tree** and **Generalized Boosted Model**, as described below.
+A Confusion Matrix is plotted at the end of each analysis to better visualize the accuracy of the models.
+
+**1. Model: Random Forest**
+
+```{r RF, echo=TRUE}
+# model random forest
+
+set.seed(12345)
+
+#modFitRF <- train(classe ~ ., data = trainSet, method = "rf", do.tra)
+
+modFitRF <- randomForest(classe ~ ., data = trainSet, do.trace = F) ##much faster 
+
+modFitRF$finalModel
+
+#prediction on testset
+predict_RF <- predict(modFitRF, newdata = testSet)
+
+confMat_RF <- confusionMatrix(predict_RF, testSet$classe); confMat_RF
+
+#plotting results
+plot(confMat_RF$table, col = confMat_RF$byClass, main = paste("Random Forest - Accuracy = ", round(confMat_RF$overall['Accuracy'], 4)))
+
+
+
+```
+
+
+**2. Model: Decision Trees**
+
+```{r decision, echo=TRUE}
+#model fitting
+set.seed(12345)
+modFitDT <- rpart(classe ~ ., data = trainSet, method = "class")
+
+fancyRpartPlot(modFitDT)
+
+# prediction on testset
+predict_DT <- predict(modFitDT, newdata = testSet, type = "class")
+confMat_DT <- confusionMatrix(predict_DT, testSet$classe)
+confMat_DT
+
+# plot matrix results 
+plot(confMat_DT$table, col = confMat_DT$byClass, main = paste("Decision Tree - Accuracy = ", round(confMat_DT$overall['Accuracy'], 4)))
+
+
+
+```
+
+
+**3. Model: Generalized Boosted Model**
+
+```{r gbm, echo=TRUE}
+# model fit
+set.seed(12345)
+controlGBM <- trainControl(method = "repeatedCV", number = 5, repeats = 1)
+
+modFitGBM <- train(classe ~ ., data = trainSet, method = "gbm", trControl = controlGBM, verbose = F)
+
+
+modFitGBM$finalModel 
+
+# prediction on testset
+predict_GBM <- predict(modFitGBM, newdata = testSet)
+confMat_GBM <- confusionMatrix(predict_GBM, testSet$classe)
+
+confMat_GBM
+
+# plot matrix results
+plot(confMat_GBM$table, col = confMat_GBM$byClass, main = paste("GBM - Accuracy = ", round(confMat_GBM$overall['Accuracy'], 4)))
+
+
+```
+
+-----------------------------------------------
+
+##Applying selected model to Testing Dataset:
+
+The accuracy of the 3 regression modeling methods above are:
+
+    Random Forest : 0.9952
+    Decision Tree : 0.7368
+    GBM : 0.9857
+    
+In that case, the **Random Forest model** will be applied to predict the 20 quiz results (testing dataset) as shown below.
+
+```{r test, echo=TRUE}
+predict_testing <- predict(modFitRF, newdata = testing)
+
+predict_testing
+
+
+```
